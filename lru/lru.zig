@@ -11,7 +11,7 @@ pub const Kind = enum {
     non_locking,
 };
 
-/// concurrent LRUCache using RWLock
+/// Concurrent LRUCache using RWLock
 pub fn LruCache(comptime kind: Kind, comptime K: type, comptime V: type) type {
     return struct {
         mux: if (kind == .locking) Mutex else void,

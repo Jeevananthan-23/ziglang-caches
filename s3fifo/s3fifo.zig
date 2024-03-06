@@ -75,19 +75,14 @@ pub fn S3fifo(comptime K: type, comptime V: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            // std.debug.print("before: {} and mainsize: {} and smallsize: {} and ghost: {}\n", .{ self.len, self.main.len, self.small.len, self.ghost.len });
-            // if (self.len != self.small.len + self.main.len + self.ghost.len) {
-            //     self.len = self.small.len + self.main.len + self.ghost.len;
-            // }
-
             // std.debug.print("before_small_pop: {} and mainsize: {} and smallsize: {} and ghost: {}\n", .{ self.len, self.main.len, self.small.len, self.ghost.len });
             while (self.small.pop()) |node| {
                 self.deinitNode(node);
                 // std.debug.print("poped from small\n", .{});
             }
             // std.debug.print("before_ghost_pop: {} and mainsize: {} and smallsize: {} and ghost: {}\n", .{ self.len, self.main.len, self.small.len, self.ghost.len });
-            while (self.ghost.pop()) |*node| : (self.len -= 1) {
-                self.allocator.destroy(node.*);
+            while (self.ghost.pop()) |node| : (self.len -= 1) {
+                self.allocator.destroy(node);
                 // std.debug.print("poped from ghost\n", .{});
             }
 

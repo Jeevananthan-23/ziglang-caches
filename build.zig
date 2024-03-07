@@ -15,11 +15,25 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // Main modules for projects to use.
+    const lrucache_module = b.addModule("lru", .{ .root_source_file = .{ .path = "lru/lru.zig" } });
+
+    // const s3fifocache_module = b.addModule("s3fifo", .{ .root_source_file = .{ .path = "s3fifo/s3fifo.zig" } });
+
     const lib = b.addStaticLibrary(.{
-        .name = "ziglang-caches",
+        .name = "ziglang-caches-lrucache",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "lru/lru.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const lib2 = b.addStaticLibrary(.{
+        .name = "ziglang-caches-s3fifocache",
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = .{ .path = "s3fifo/s3fifo.zig" },
         .target = target,
         .optimize = optimize,
     });
@@ -28,6 +42,7 @@ pub fn build(b: *std.Build) void {
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     b.installArtifact(lib);
+    b.installArtifact(lib2);
 
     const exe = b.addExecutable(.{
         .name = "ziglang-caches",
@@ -35,6 +50,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe.root_module.addImport("lru", lrucache_module);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -74,6 +91,14 @@ pub fn build(b: *std.Build) void {
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
+    const lib2_unit_tests = b.addTest(.{
+        .root_source_file = .{ .path = "lru/lru.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_lib2_unit_tests = b.addRunArtifact(lib2_unit_tests);
+
     const exe_unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
@@ -88,4 +113,5 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+    test_step.dependOn(&run_lib2_unit_tests.step);
 }

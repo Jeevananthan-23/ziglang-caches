@@ -15,7 +15,7 @@ This offers state-of-the-art efficiency and scalability compared to other LRU-ba
 
 ```zig
 const std = @import("std");
-const lru = @import("lru.zig");
+const lru = @import("lru");
 
 const cache = lru.LruCache(.locking, u8, []const u8);
 
@@ -44,3 +44,41 @@ pub fn main() !void {
     std.debug.print("key: 1 exists: {} \n", .{lrucache.contains(1)});
 }
 ```
+
+### :rocket: Usage
+
+1. Add `ziglang-caches` as a dependency in your `build.zig.zon`.
+
+    <details>
+
+    <summary><code>build.zig.zon</code> example</summary>
+
+    ```zig
+    .{
+        .name = "<name_of_your_package>",
+        .version = "<version_of_your_package>",
+        .dependencies = .{
+            .caches = .{
+                .url = "https://github.com/jeevananthan-23/ziglang-caches/archive/<git_tag_or_commit_hash>.tar.gz",
+                .hash = "<package_hash>",
+            },
+        },
+    }
+    ```
+
+    Set `<package_hash>` to `12200000000000000000000000000000000000000000000000000000000000000000`, and Zig will provide the correct found value in an error message.
+
+    </details>
+
+2. Add `lrucache` as a module in your `build.zig`.
+
+    <details>
+
+    <summary><code>build.zig</code> example</summary>
+
+    ```zig
+    const lrucache = b.dependency("caches", .{});
+    exe.addModule("lrucache", lrucache.module("lrucache"));
+    ```
+
+    </details>

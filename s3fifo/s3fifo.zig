@@ -202,11 +202,11 @@ pub fn S3fifo(comptime kind: Kind, K: type, comptime V: type) type {
 
 test "s3fifotest: base" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.print("GPA result: {}\n", .{gpa.deinit()});
+    defer std.debug.print("\n GPA result: {}\n", .{gpa.deinit()});
     var logging_alloc = std.heap.loggingAllocator(gpa.allocator());
     const allocator = logging_alloc.allocator();
 
-    var cache = S3fifo(.non_locking, u64, []const u8).init(allocator, 2);
+    var cache = S3fifo(.non_locking, u64, []const u8).init(allocator, 3);
     defer cache.deinit();
 
     try cache.insert(1, "one");
@@ -220,14 +220,14 @@ test "s3fifotest: base" {
     try testing.expect(cache.contains(1));
 }
 
-// test "s3fifotest: push and read" {
-//     var cache = S3fifo(.locking, []const u8, []const u8).init(testing.allocator, 2);
-//     defer cache.deinit();
+test "s3fifotest: push and read" {
+    var cache = S3fifo(.locking, []const u8, []const u8).init(testing.allocator, 2);
+    defer cache.deinit();
 
-//     try cache.insert("apple", "red");
-//     try cache.insert("banana", "yellow");
-//     const red = cache.get("apple");
-//     const yellow = cache.get("banana");
-//     try testing.expectEqual(red.?, "red");
-//     try testing.expectEqual(yellow.?, "yellow");
-// }
+    try cache.insert("apple", "red");
+    try cache.insert("banana", "yellow");
+    const red = cache.get("apple");
+    const yellow = cache.get("banana");
+    try testing.expectEqual(red.?, "red");
+    try testing.expectEqual(yellow.?, "yellow");
+}

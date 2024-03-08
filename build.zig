@@ -1,48 +1,54 @@
 const std = @import("std");
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
     // Main modules for projects to use.
-    const lrucache_module = b.addModule("lru", .{ .root_source_file = .{ .path = "lru/lru.zig" } });
+    const lru_module = b.addModule("lrucache", .{ .root_source_file = .{ .path = "lru/lru.zig" } });
 
-    // const s3fifocache_module = b.addModule("s3fifo", .{ .root_source_file = .{ .path = "s3fifo/s3fifo.zig" } });
+    _ = b.addModule("s3fifocache", .{ .root_source_file = .{ .path = "s3fifo/s3fifo.zig" } });
 
-    const lib = b.addStaticLibrary(.{
-        .name = "ziglang-caches-lrucache",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
+    // Library
+    const lib_step = b.step("lib", "Install library");
+
+    const liblru = b.addStaticLibrary(.{
+        .name = "lrucache",
         .root_source_file = .{ .path = "lru/lru.zig" },
         .target = target,
         .optimize = optimize,
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
 
-    const lib2 = b.addStaticLibrary(.{
-        .name = "ziglang-caches-s3fifocache",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
+    const libs3fifo = b.addStaticLibrary(.{
+        .name = "s3fifocache",
         .root_source_file = .{ .path = "s3fifo/s3fifo.zig" },
         .target = target,
         .optimize = optimize,
+        .version = .{ .major = 0, .minor = 1, .patch = 0 },
     });
 
-    // This declares intent for the library to be installed into the standard
-    // location when the user invokes the "install" step (the default step when
-    // running `zig build`).
-    b.installArtifact(lib);
-    b.installArtifact(lib2);
+    const liblru_install = b.addInstallArtifact(liblru, .{});
+    const libs3fifo_instal = b.addInstallArtifact(libs3fifo, .{});
+
+    lib_step.dependOn(&liblru_install.step);
+    lib_step.dependOn(&libs3fifo_instal.step);
+    b.default_step.dependOn(lib_step);
+
+    // Docs
+    const docs_step = b.step("docs", "Emit docs");
+
+    const docs_install = b.addInstallDirectory(.{
+        .source_dir = libs3fifo.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    docs_step.dependOn(&docs_install.step);
+    b.default_step.dependOn(docs_step);
+
+    // Sample cache in Main
+    const run_step = b.step("run", "Run the app");
 
     const exe = b.addExecutable(.{
         .name = "ziglang-caches",
@@ -51,67 +57,45 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    exe.root_module.addImport("lru", lrucache_module);
+    exe.root_module.addImport("lru", lru_module);
 
-    // This declares intent for the executable to be installed into the
-    // standard location when the user invokes the "install" step (the default
-    // step when running `zig build`).
     b.installArtifact(exe);
 
-    // This *creates* a Run step in the build graph, to be executed when another
-    // step is evaluated that depends on it. The next line below will establish
-    // such a dependency.
     const run_cmd = b.addRunArtifact(exe);
-
-    // By making the run step depend on the install step, it will be run from the
-    // installation directory rather than directly from within the cache directory.
-    // This is not necessary, however, if the application depends on other installed
-    // files, this ensures they will be present and in the expected location.
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    // This creates a build step. It will be visible in the `zig build --help` menu,
-    // and can be selected like this: `zig build run`
-    // This will evaluate the `run` step rather than the default, which is "install".
-    const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "lru/lru.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
-
-    const lib2_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "lru/lru.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_lib2_unit_tests = b.addRunArtifact(lib2_unit_tests);
-
-    const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
+    // Tests
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
-    test_step.dependOn(&run_exe_unit_tests.step);
-    test_step.dependOn(&run_lib2_unit_tests.step);
+
+    const liblru_unit_tests = b.addTest(.{
+        .root_source_file = .{ .path = "lru/lru.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_liblru_unit_tests = b.addRunArtifact(liblru_unit_tests);
+
+    const libs3fifo_unit_tests = b.addTest(.{
+        .root_source_file = .{ .path = "s3fifo/s3fifo.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_libs3fifo_unit_tests = b.addRunArtifact(libs3fifo_unit_tests);
+
+    test_step.dependOn(&run_liblru_unit_tests.step);
+    test_step.dependOn(&run_libs3fifo_unit_tests.step);
+
+    // Lints
+    const lints_step = b.step("lint", "Run lints");
+
+    const lints = b.addFmt(.{
+        .paths = &.{ "src", "build.zig" },
+        .check = true,
+    });
+
+    lints_step.dependOn(&lints.step);
+    b.default_step.dependOn(lints_step);
 }

@@ -1,6 +1,6 @@
 .{
     .name = "ziglanf-caches",
-    .version = "0.1.0",
+    .version = "0.2.0",
     .minimum_zig_version = "0.12.0-dev.2334+aef1da163",
     .paths = .{
         ".",

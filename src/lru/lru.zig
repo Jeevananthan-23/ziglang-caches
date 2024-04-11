@@ -1,26 +1,18 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const TailQueue = std.TailQueue;
+const TailQueue = std.DoublyLinkedList;
 const testing = std.testing;
 const assert = std.debug.assert;
 const Mutex = std.Thread.RwLock;
-const Atomic = std.atomic;
 
 pub const Kind = enum {
     locking,
     non_locking,
 };
 
-/// Concurrent LRUCache using RWLock
+// TODO: allow for passing custom hash context to use in std.ArrayHashMap for performance.
 pub fn LruCache(comptime kind: Kind, comptime K: type, comptime V: type) type {
     return struct {
-        mux: if (kind == .locking) Mutex else void,
-        allocator: Allocator,
-        hashmap: if (K == []const u8) std.StringArrayHashMap(*Node) else std.AutoArrayHashMap(K, *Node),
-        dbl_link_list: TailQueue(LruEntry),
-        max_items: usize,
-        len: usize,
-
         const Self = @This();
 
         pub const LruEntry = struct {
@@ -38,6 +30,13 @@ pub fn LruCache(comptime kind: Kind, comptime K: type, comptime V: type) type {
         };
 
         const Node = TailQueue(LruEntry).Node;
+
+        mux: if (kind == .locking) Mutex else void,
+        allocator: Allocator,
+        hashmap: if (K == []const u8) std.StringArrayHashMap(*Node) else std.AutoArrayHashMap(K, *Node),
+        dbl_link_list: TailQueue(LruEntry),
+        max_items: usize,
+        len: usize,
 
         fn initNode(self: *Self, key: K, val: V) error{OutOfMemory}!*Node {
             self.len += 1;
@@ -120,7 +119,7 @@ pub fn LruCache(comptime kind: Kind, comptime K: type, comptime V: type) type {
 
         /// Inserts key/value if key doesn't exist, updates only value if it does.
         /// In any case, it will affect cache ordering.
-        pub fn insert(self: *Self, key: K, value: V) error{OutOfMemory}!void {
+        pub fn set(self: *Self, key: K, value: V) error{OutOfMemory}!void {
             if (kind == .locking) {
                 self.mux.lock();
                 defer self.mux.unlock();
@@ -258,10 +257,10 @@ test "common.lru: LruCache state is correct" {
     var cache = try LruCache(.locking, u64, []const u8).init(testing.allocator, 4);
     defer cache.deinit();
 
-    try cache.insert(1, "one");
-    try cache.insert(2, "two");
-    try cache.insert(3, "three");
-    try cache.insert(4, "four");
+    try cache.set(1, "one");
+    try cache.set(2, "two");
+    try cache.set(3, "three");
+    try cache.set(4, "four");
     try testing.expectEqual(@as(usize, 4), cache.dbl_link_list.len);
     try testing.expectEqual(@as(usize, 4), cache.hashmap.keys().len);
     try testing.expectEqual(@as(usize, 4), cache.len);
@@ -271,7 +270,7 @@ test "common.lru: LruCache state is correct" {
     try testing.expectEqual(cache.mru().?.value, "two");
     try testing.expectEqual(cache.lru().?.value, "one");
 
-    try cache.insert(5, "five");
+    try cache.set(5, "five");
     try testing.expectEqual(cache.mru().?.value, "five");
     try testing.expectEqual(cache.lru().?.value, "three");
     try testing.expectEqual(@as(usize, 4), cache.dbl_link_list.len);
@@ -290,7 +289,7 @@ test "common.lru: put works as expected" {
     var cache = try LruCache(.non_locking, []const u8, usize).init(testing.allocator, 4);
     defer cache.deinit();
 
-    try cache.insert("a", 1);
+    try cache.set("a", 1);
 
     const old = cache.put("a", 2);
 
@@ -301,3 +300,62 @@ test "common.lru: put works as expected" {
     try testing.expectEqual(possible_old, null);
     try testing.expectEqual(@as(usize, 3), cache.get("b").?);
 }
+
+test "common.lru: locked put is thread safe" {
+    var cache = try LruCache(.locking, usize, usize).init(testing.allocator, 4);
+    defer cache.deinit();
+    var threads = std.ArrayList(std.Thread).init(testing.allocator);
+    defer threads.deinit();
+    for (0..2) |_| try threads.append(try std.Thread.spawn(.{}, test_put, .{ &cache, 1 }));
+    for (threads.items) |thread| thread.join();
+}
+
+test "common.lru: locked set is thread safe" {
+    var cache = try LruCache(.locking, usize, usize).init(testing.allocator, 4);
+    defer cache.deinit();
+    var threads = std.ArrayList(std.Thread).init(testing.allocator);
+    defer threads.deinit();
+    for (0..2) |_| try threads.append(try std.Thread.spawn(.{}, test_insert, .{ &cache, 1 }));
+    for (threads.items) |thread| thread.join();
+}
+
+fn test_put(lru_cache: *LruCache(.locking, usize, usize), k: usize) void {
+    _ = lru_cache.put(k, 2);
+}
+fn test_insert(lru_cache: *LruCache(.locking, usize, usize), k: usize) void {
+    _ = lru_cache.set(k, 2) catch unreachable;
+}
+
+pub const BenchmarkLRUCache = struct {
+    pub const min_iterations = 10;
+    pub const max_iterations = 100;
+    pub var hits: u64 = 0;
+    pub var misses: u64 = 0;
+    pub const args = [_]usize{
+        1_000,
+        5_000,
+        10_000,
+    };
+
+    pub const arg_names = [_][]const u8{
+        "1k_iters",
+        "5k_iters",
+        "10k_iters",
+    };
+
+    pub fn benchmarkLRUGetandSet(num_iterations: usize) !void {
+        var cache = try LruCache(.locking, u32, usize).init(std.heap.page_allocator, 200);
+        defer cache.deinit();
+        var rand_impl = std.rand.DefaultPrng.init(num_iterations);
+        for (0..num_iterations) |_| {
+            const num = rand_impl.random().uintLessThan(u32, @as(u32, @intCast(num_iterations)) + 1);
+            const val = cache.get(num);
+            if (val != null) {
+                hits += 1;
+            } else {
+                misses += 1;
+                _ = try cache.set(num, num);
+            }
+        }
+    }
+};
